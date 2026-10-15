@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redis Demo</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --line: #334155; --text: #e2e8f0; --muted: #94a3b8;
+    --green: #22c55e; --orange: #f97316; --blue: #38bdf8; --red: #ef4444; --redis: #dc382d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 18px/1.5 system-ui, "Segoe UI", sans-serif; }
+  header { padding: 18px 32px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; }
+  header h1 { font-size: 22px; margin: 0 24px 0 0; }
+  .tab { background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 20px;
+         border-radius: 8px; font-size: 18px; cursor: pointer; }
+  .tab.active { background: var(--blue); color: #0f172a; border-color: var(--blue); font-weight: 600; }
+  main { padding: 24px 32px; display: grid; grid-template-columns: 1fr 380px; gap: 24px; max-width: 1400px; margin: auto; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section.view { display: none; } section.view.active { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .card h2 { margin: 0 0 12px; font-size: 18px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  button.act { background: var(--blue); color: #0f172a; border: 0; padding: 10px 18px; border-radius: 8px;
+               font-size: 17px; font-weight: 600; cursor: pointer; margin: 0 8px 8px 0; }
+  button.act:hover { filter: brightness(1.1); }
+  button.act.warn { background: var(--orange); } button.act.ghost { background: #475569; color: var(--text); }
+  button:disabled { opacity: .5; cursor: wait; }
+  select { font-size: 17px; padding: 9px; border-radius: 8px; background: #0f172a; color: var(--text); border: 1px solid var(--line); }
+
+  /* flow diagram */
+  .flow { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .node { flex: 0 0 150px; text-align: center; border: 2px solid var(--line); border-radius: 12px; padding: 14px 8px;
+          background: #0f172a; transition: .25s; }
+  .node b { display: block; font-size: 19px; } .node small { color: var(--muted); font-size: 14px; }
+  .node.redis { border-color: var(--redis); }
+  .node.on { box-shadow: 0 0 0 4px rgba(56,189,248,.35); border-color: var(--blue); }
+  .node.hit { box-shadow: 0 0 0 4px rgba(34,197,94,.45); border-color: var(--green); }
+  .node.miss { box-shadow: 0 0 0 4px rgba(249,115,22,.45); border-color: var(--orange); }
+  .arrow { flex: 1; height: 6px; background: var(--line); border-radius: 3px; position: relative; overflow: hidden; }
+  .arrow.on::after { content: ""; position: absolute; top: 0; left: -40%; width: 40%; height: 100%;
+                     background: var(--blue); animation: slide .8s linear infinite; }
+  .arrow.slow::after { background: var(--orange); animation-duration: 1.6s; }
+  @keyframes slide { to { left: 100%; } }
+  .caption { text-align: center; margin-top: 14px; min-height: 52px; font-size: 20px; }
+
+  .result { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; margin-top: 8px; }
+  .badge { padding: 4px 14px; border-radius: 999px; font-weight: 700; font-size: 20px; }
+  .badge.hit { background: var(--green); color: #052e16; } .badge.miss { background: var(--orange); color: #431407; }
+  .badge.ok { background: var(--green); color: #052e16; } .badge.err { background: var(--red); color: #fff; }
+  .ms { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .bars .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 16px; }
+  .bars .lbl { flex: 0 0 120px; color: var(--muted); }
+  .bars .bar { height: 22px; border-radius: 4px; min-width: 4px; transition: width .4s; }
+  .bars .bar.hit { background: var(--green); } .bars .bar.miss { background: var(--orange); }
+
+  /* redis panel */
+  .rkey { border: 1px solid var(--line); border-left: 4px solid var(--redis); border-radius: 8px; padding: 10px 12px;
+          margin-bottom: 10px; background: #0f172a; font-family: Consolas, monospace; font-size: 14px; word-break: break-all; }
+  .rkey .k { color: #fca5a5; font-weight: 700; font-size: 15px; }
+  .rkey .v { color: var(--muted); margin-top: 4px; }
+  .ttl { height: 6px; background: var(--line); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .ttl > i { display: block; height: 100%; background: var(--green); transition: width 1s linear; }
+  .ttl-txt { font-size: 14px; color: var(--green); margin-top: 4px; }
+  .empty { color: var(--muted); font-style: italic; }
+
+  .steps { counter-reset: s; padding: 0; list-style: none; margin: 0 0 4px; }
+  .steps li { counter-increment: s; padding: 6px 0 6px 40px; position: relative; color: var(--muted); transition: .25s; }
+  .steps li::before { content: counter(s); position: absolute; left: 0; top: 6px; width: 28px; height: 28px; border-radius: 50%;
+                      background: var(--line); color: var(--text); text-align: center; line-height: 28px; font-weight: 700; }
+  .steps li.now { color: var(--text); } .steps li.now::before { background: var(--blue); color: #0f172a; }
+  .sid { font-family: Consolas, monospace; font-size: 15px; background: #0f172a; border: 1px dashed var(--line);
+         padding: 8px 12px; border-radius: 8px; word-break: break-all; color: var(--blue); min-height: 40px; }
+  .servers { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 700px) { .servers { grid-template-columns: 1fr; } }
+  .server { border-top: 4px solid var(--blue); }
+  .server.b { border-top-color: #a78bfa; }
+  .server h3 { margin: 0 0 4px; font-size: 22px; } .server .port { font-family: Consolas, monospace; color: var(--muted); }
+  .server.flash { animation: flash .8s; }
+  @keyframes flash { from { box-shadow: 0 0 0 6px rgba(56,189,248,.5); } to { box-shadow: none; } }
+  .tab.mode { font-size: 16px; padding: 6px 14px; }
+  pre { margin: 8px 0 0; background: #0f172a; padding: 12px; border-radius: 8px; font-size: 15px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Redis Demo</h1>
+  <button class="tab active" data-view="cache">1. Caching</button>
+  <button class="tab" data-view="session">2. Session storage</button>
+</header>
+
+<main>
+  <div>
+    <!-- ================= CACHING ================= -->
+    <section class="view active" id="view-cache">
+      <div class="card">
+        <h2>Luồng dữ liệu (cache-aside)</h2>
+        <div class="flow">
+          <div class="node" id="c-client"><b>Trình duyệt</b><small>người dùng</small></div>
+          <div class="arrow" id="c-a1"></div>
+          <div class="node redis" id="c-redis"><b>Redis</b><small>cache, rất nhanh</small></div>
+          <div class="arrow" id="c-a2"></div>
+          <div class="node" id="c-api"><b>API gốc</b><small>chậm ~2 giây</small></div>
+        </div>
+        <div class="caption" id="c-caption">Bấm “Lấy dữ liệu” để bắt đầu.</div>
+      </div>
+
+      <div class="card">
+        <h2>Bước 1: Đăng nhập ở Server A (tạo session)</h2>
+        <label>Đăng nhập là: <select id="c-user">
+          <option value="1">Nguyen Van A</option><option value="2">Tran Thi B</option><option value="3">Le Van C</option>
+        </select></label>
+        <button class="act" id="c-login" style="margin-left:12px">Đăng nhập</button>
+        <div class="sid" id="c-sid" style="margin-top:10px"><span class="empty">(chưa đăng nhập)</span></div>
+
+        <h2 style="margin-top:20px">Bước 2: Lấy dữ liệu người dùng (qua cache)</h2>
+        <button class="act" id="c-fetch" disabled title="Hãy đăng nhập trước">Lấy dữ liệu</button>
+        <button class="act warn" id="c-clear">Xóa cache</button>
+        <button class="act ghost" id="c-next" style="display:none">Sang phần 2: Session →</button>
+        <div class="result" id="c-result"></div>
+        <pre id="c-json" style="display:none"></pre>
+      </div>
+
+      <div class="card bars">
+        <h2>Lịch sử thời gian phản hồi</h2>
+        <div id="c-bars"><span class="empty">Chưa có yêu cầu nào.</span></div>
+      </div>
+    </section>
+
+    <!-- ================= SESSION ================= -->
+    <section class="view" id="view-session">
+      <div class="card">
+        <h2>Kịch bản: 2 server, đăng nhập ở một nơi, dùng ở nơi khác</h2>
+        <ol class="steps" id="s-steps">
+          <li>Đăng nhập ở <b>Server A</b>, server tạo <b>session_id</b> và lưu session</li>
+          <li>Trình duyệt giữ session_id, gửi kèm mỗi yêu cầu (header <code>X-Session-Id</code>)</li>
+          <li>Gọi <b>Server B</b> (chưa từng đăng nhập ở đây) với cùng session_id. Server B có nhận ra không?</li>
+        </ol>
+        <div style="margin-top:14px">Session lưu ở:
+          <button class="tab mode active" data-mode="redis">Redis (dùng chung)</button>
+          <button class="tab mode" data-mode="memory">RAM riêng của từng server</button>
+        </div>
+        <div class="caption" id="s-mode-note" style="text-align:left;font-size:17px"></div>
+      </div>
+
+      <div class="card">
+        <label>Đăng nhập là: <select id="s-user">
+          <option value="1">Nguyen Van A</option><option value="2">Tran Thi B</option><option value="3">Le Van C</option>
+        </select></label>
+        <h2 style="margin-top:14px">session_id trình duyệt đang giữ</h2>
+        <div class="sid" id="s-sid"><span class="empty">(chưa đăng nhập)</span></div>
+        <button class="act ghost" id="s-fake" style="margin-top:10px">Dùng session giả mạo</button>
+      </div>
+
+      <div class="servers" id="s-servers"></div>
+
+      <div class="card" style="text-align:center">
+        <div class="node redis" id="s-store" style="display:inline-block;min-width:260px">
+          <b id="s-store-title">Redis</b><small id="s-store-sub">kho session dùng chung cho mọi server</small>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= REDIS LIVE ================= -->
+  <aside>
+    <div class="card">
+      <h2 style="color:var(--redis)">Bên trong Redis (trực tiếp)</h2>
+      <div id="redis-keys"><span class="empty">Redis đang trống.</span></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let sessionId = null;
+const TTL_MAX = {};      // key -> TTL lớn nhất đã thấy, để vẽ thanh còn lại
+
+// ---------- tabs ----------
+document.querySelectorAll("header .tab").forEach(b => b.onclick = () => {
+  document.querySelectorAll("header .tab").forEach(x => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + b.dataset.view));
+});
+
+// ---------- Redis live panel ----------
+async function refreshRedis() {
+  try {
+    const items = await (await fetch("/demo/redis")).json();
+    const box = $("redis-keys");
+    if (!items.length) { box.innerHTML = '<span class="empty">Redis đang trống.</span>'; return; }
+    box.innerHTML = items.map(it => {
+      TTL_MAX[it.key] = Math.max(TTL_MAX[it.key] || 0, it.ttl);
+      const pct = it.ttl > 0 ? Math.min(100, it.ttl / TTL_MAX[it.key] * 100) : 0;
+      const short = it.key.length > 28 ? it.key.slice(0, 28) + "…" : it.key;
+      return `<div class="rkey"><div class="k">${short}</div><div class="v">${it.value ?? ""}</div>
+        <div class="ttl"><i style="width:${pct}%"></i></div>
+        <div class="ttl-txt">hết hạn sau ${it.ttl < 0 ? "∞" : it.ttl + " giây"}</div></div>`;
+    }).join("");
+  } catch (e) { $("redis-keys").textContent = "Không đọc được Redis."; }
+}
+setInterval(refreshRedis, 1000); refreshRedis();
+
+// ---------- 1. CACHING ----------
+const clearFlow = () => ["c-client","c-redis","c-api"].forEach(i => $(i).className = "node" + (i==="c-redis"?" redis":""))
+                         || ["c-a1","c-a2"].forEach(i => $(i).className = "arrow");
+const barsHist = [];
+
+$("c-fetch").onclick = async () => {
+  const uid = loggedUser.id, btn = $("c-fetch");
+  btn.disabled = true; clearFlow();
+  $("c-client").classList.add("on"); $("c-a1").classList.add("on");
+  $("c-caption").textContent = "Trình duyệt hỏi Redis: “Có dữ liệu user " + uid + " chưa?”";
+  // nếu 300ms vẫn chưa có kết quả => Redis không có (MISS) => đang chờ API gốc chậm
+  const waitTimer = setTimeout(() => {
+    $("c-redis").classList.add("miss"); $("c-a2").classList.add("on", "slow"); $("c-api").classList.add("on");
+    $("c-caption").innerHTML = "<b style='color:var(--orange)'>Redis chưa có</b> → phải đi hỏi API gốc, đang chờ…";
+  }, 300);
+  const res = await fetch("/demo/cache/" + uid), j = await res.json();
+  clearTimeout(waitTimer); clearFlow();
+  const hit = j.source === "redis";
+  $("c-client").classList.add("on");
+  if (hit) {
+    $("c-a1").classList.add("on"); $("c-redis").classList.add("hit");
+    $("c-caption").innerHTML = "<b style='color:var(--green)'>Redis có sẵn</b> → trả về ngay, không cần gọi API gốc";
+  } else {
+    $("c-redis").classList.add("miss"); $("c-api").classList.add("miss");
+    $("c-caption").innerHTML = `API gốc trả dữ liệu → <b>lưu vào Redis</b> (TTL ${j.ttl} giây) cho lần sau`;
+  }
+  $("c-result").innerHTML = `<span class="badge ${hit ? "hit" : "miss"}">${hit ? "CACHE HIT" : "CACHE MISS"}</span>
+     <span class="ms">${j.ms} ms</span>`;
+  $("c-json").style.display = "block"; $("c-json").textContent = JSON.stringify(j.data, null, 2);
+  barsHist.unshift({ uid, ms: j.ms, hit }); if (barsHist.length > 8) barsHist.pop();
+  $("c-bars").innerHTML = barsHist.map(b => `<div class="row"><span class="lbl">user ${b.uid} · ${b.hit ? "HIT" : "MISS"}</span>
+     <div class="bar ${b.hit ? "hit" : "miss"}" style="width:${Math.max(1, b.ms / 2200 * 60)}%"></div><span>${b.ms} ms</span></div>`).join("");
+  btn.disabled = false; refreshRedis();
+};
+
+// trạng thái đăng nhập dùng chung cho cả phần 1 và phần 2
+let loggedUser = null;       // { id, name }
+function setLogin(sid, server, user) {
+  sessionId = sid; loginServer = server; loggedUser = user;
+  $("c-sid").innerHTML = sid
+    ? `Đã đăng nhập: <b>${user.name}</b> ở ${server}<br>session_id = ${sid}`
+    : '<span class="empty">(chưa đăng nhập)</span>';
+  $("c-fetch").disabled = !sid;
+  $("c-next").style.display = sid ? "inline-block" : "none";
+  showSid();
+}
+
+$("c-login").onclick = async () => {
+  const sel = $("c-user"), user = { id: sel.value, name: sel.selectedOptions[0].text };
+  try {   // phần 1 luôn lưu session vào Redis, ở Server A
+    const res = await fetch(`${SERVERS[0].url}/login?user_id=${user.id}`, { method: "POST" });
+    const j = await res.json();
+    if (res.ok) setLogin(j.session_id, "Server A (phần 1)", user);
+  } catch (e) {
+    $("c-sid").textContent = `${SERVERS[0].url} chưa chạy. Mở terminal: python source_api.py 3000`;
+  }
+  refreshRedis();
+};
+
+$("c-next").onclick = () => {
+  document.querySelector('header .tab[data-view="session"]').click();
+  setMode("redis");     // session phần 1 nằm trong Redis
+  setStep(1);
+};
+
+$("c-clear").onclick = async () => {
+  await fetch("/demo/cache", { method: "DELETE" });
+  clearFlow(); $("c-caption").textContent = "Đã xóa cache. Lần lấy tiếp theo sẽ là MISS.";
+  $("c-result").innerHTML = ""; $("c-json").style.display = "none"; refreshRedis();
+};
+
+// ---------- 2. SESSION (2 server dùng chung / không dùng chung kho session) ----------
+const SERVERS = [
+  { id: "a", name: "Server A", url: "http://localhost:3000" },
+  { id: "b", name: "Server B", url: "http://localhost:3001" },
+];
+let mode = "redis";          // "redis" | "memory"
+let loginServer = null;      // server đã cấp session hiện tại
+
+const MODE_NOTE = {
+  redis: "Mọi server cùng đọc/ghi <b style='color:var(--redis)'>một Redis</b>, nên session tạo ở Server A thì Server B cũng thấy.",
+  memory: "Mỗi server giữ session trong <b style='color:var(--orange)'>RAM riêng</b> (biến Python), nên Server B không biết session do Server A tạo.",
+};
+
+function setStep(n) { document.querySelectorAll("#s-steps li").forEach((li, i) => li.classList.toggle("now", i === n)); }
+function showSid() {
+  $("s-sid").innerHTML = sessionId
+    ? `${sessionId}<br><small style="color:var(--muted)">cấp bởi ${loginServer ?? "?"}</small>`
+    : '<span class="empty">(chưa đăng nhập)</span>';
+}
+function showResult(srv, status, body) {
+  const ok = status < 300;
+  $("res-" + srv.id).innerHTML = status
+    ? `<span class="badge ${ok ? "ok" : "err"}">HTTP ${status}</span> <span>${ok ? "nhận ra người dùng" : "không nhận ra"}</span>`
+    : `<span class="badge err">Không kết nối được</span>`;
+  $("json-" + srv.id).style.display = "block";
+  $("json-" + srv.id).textContent = JSON.stringify(body, null, 2);
+  const card = $("srv-" + srv.id); card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");
+}
+async function call(srv, method, path) {
+  const prefix = mode === "memory" ? "/memory" : "";
+  try {
+    const res = await fetch(srv.url + prefix + path, {
+      method, headers: sessionId ? { "X-Session-Id": sessionId } : {},
+    });
+    return [res.status, await res.json()];
+  } catch (e) {
+    return [0, { error: `${srv.url} chưa chạy. Mở terminal: python source_api.py ${srv.url.split(":").pop()}` }];
+  }
+}
+
+$("s-servers").innerHTML = SERVERS.map(s => `
+  <div class="card server ${s.id}" id="srv-${s.id}">
+    <h3>${s.name}</h3><div class="port">${s.url}</div><br>
+    <button class="act" data-srv="${s.id}" data-do="login">Đăng nhập</button>
+    <button class="act" data-srv="${s.id}" data-do="profile">Xem profile</button>
+    <button class="act warn" data-srv="${s.id}" data-do="logout">Đăng xuất</button>
+    <div class="result" id="res-${s.id}"></div>
+    <pre id="json-${s.id}" style="display:none"></pre>
+  </div>`).join("");
+
+$("s-servers").onclick = async e => {
+  const btn = e.target.closest("button[data-do]"); if (!btn) return;
+  const srv = SERVERS.find(s => s.id === btn.dataset.srv), action = btn.dataset.do;
+  if (action === "login") {
+    setStep(0);
+    const [st, j] = await call(srv, "POST", "/login?user_id=" + $("s-user").value);
+    const sel = $("s-user");
+    if (st === 200) setLogin(j.session_id, srv.name, { id: sel.value, name: sel.selectedOptions[0].text });
+    showResult(srv, st, j);
+  } else if (action === "profile") {
+    setStep(loginServer && loginServer !== srv.name ? 2 : 1);
+    showResult(srv, ...(await call(srv, "GET", "/profile")));
+  } else {
+    showResult(srv, ...(await call(srv, "POST", "/logout")));   // giữ sessionId để bấm lại sẽ thấy 401
+  }
+  refreshRedis();
+};
+
+$("s-fake").onclick = () => { sessionId = "session-gia-mao-123"; loginServer = "kẻ gian"; showSid(); setStep(1); };
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll(".tab.mode").forEach(x => x.classList.toggle("active", x.dataset.mode === m));
+  $("s-mode-note").innerHTML = MODE_NOTE[mode];
+  const redis = mode === "redis";
+  $("s-store").className = "node " + (redis ? "redis" : "miss");
+  $("s-store-title").textContent = redis ? "Redis" : "Không có kho chung";
+  $("s-store-sub").textContent = redis ? "kho session dùng chung cho mọi server" : "mỗi server tự giữ session trong RAM của nó";
+  SERVERS.forEach(s => { $("res-" + s.id).innerHTML = ""; $("json-" + s.id).style.display = "none"; });
+}
+// đổi chế độ => session cũ không còn ý nghĩa ở chế độ mới, nên xóa
+document.querySelectorAll(".tab.mode").forEach(b => b.onclick = () => {
+  setMode(b.dataset.mode); setLogin(null, null, null); setStep(-1);
+});
+setMode("redis");
+</script>
+</body>
+</html>
